@@ -4,22 +4,42 @@
  * @see https://developers.google.com/keep/api/reference/rest
  */
 
-var Keep = (function() {
-  
+var Keep = (function () {
+
   var BASE_URL = 'https://keep.googleapis.com/';
 
   /**
    * Service class to handle API requests
+   * @param {Object} jsonKey Service Account JSON key
+   * @param {string} [userEmail] Email to impersonate (for Domain-Wide Delegation)
    */
-  var Service = function() {
-    this.token = ScriptApp.getOAuthToken();
+  var Service = function (jsonKey, userEmail) {
+    this.service = this.getOAuthService_(jsonKey, userEmail);
   };
 
-  Service.prototype.fetch = function(endpoint, method, payload, params) {
+  Service.prototype.getOAuthService_ = function (jsonKey, userEmail) {
+    return OAuth2.createService('GoogleKeep')
+      .setTokenUrl('https://oauth2.googleapis.com/token')
+      .setPrivateKey(jsonKey.private_key)
+      .setIssuer(jsonKey.client_email)
+      .setSubject(userEmail)
+      .setPropertyStore(PropertiesService.getScriptProperties())
+      .setScope('https://www.googleapis.com/auth/keep');
+  };
+
+  Service.prototype.reset = function () {
+    this.service.reset();
+  };
+
+  Service.prototype.fetch = function (endpoint, method, payload, params) {
+    if (!this.service.hasAccess()) {
+      throw new Error('Google Keep API: Access denied. ' + this.service.getLastError());
+    }
+
     var url = BASE_URL + endpoint;
-    
+
     if (params) {
-      var paramString = Object.keys(params).map(function(key) {
+      var paramString = Object.keys(params).map(function (key) {
         return encodeURIComponent(key) + '=' + encodeURIComponent(params[key]);
       }).join('&');
       if (paramString) {
@@ -30,7 +50,7 @@ var Keep = (function() {
     var options = {
       method: method || 'get',
       headers: {
-        Authorization: 'Bearer ' + this.token,
+        Authorization: 'Bearer ' + this.service.getAccessToken(),
         Accept: 'application/json'
       },
       muteHttpExceptions: true
@@ -55,21 +75,25 @@ var Keep = (function() {
     }
   };
 
-  Service.prototype.fetchMedia = function(endpoint, mimeType) {
+  Service.prototype.fetchMedia = function (endpoint, mimeType) {
+    if (!this.service.hasAccess()) {
+      throw new Error('Google Keep API: Access denied. ' + this.service.getLastError());
+    }
+
     var url = BASE_URL + endpoint;
     // For media download, we might need to append alt=media if not handled by endpoint construction
     if (url.indexOf('alt=media') === -1) {
-        url += (url.indexOf('?') === -1 ? '?' : '&') + 'alt=media';
+      url += (url.indexOf('?') === -1 ? '?' : '&') + 'alt=media';
     }
-    
+
     if (mimeType) {
-        url += '&mimeType=' + encodeURIComponent(mimeType);
+      url += '&mimeType=' + encodeURIComponent(mimeType);
     }
 
     var options = {
       method: 'get',
       headers: {
-        Authorization: 'Bearer ' + this.token
+        Authorization: 'Bearer ' + this.service.getAccessToken()
       },
       muteHttpExceptions: true
     };
@@ -87,7 +111,7 @@ var Keep = (function() {
   /**
    * Notes Resource
    */
-  var Notes = function(service) {
+  var Notes = function (service) {
     this.service = service;
     this.Permissions = new Permissions(service);
   };
@@ -97,7 +121,7 @@ var Keep = (function() {
    * @param {Object} note The note resource to create.
    * @returns {Object} The created note.
    */
-  Notes.prototype.create = function(note) {
+  Notes.prototype.create = function (note) {
     return this.service.fetch('v1/notes', 'post', note);
   };
 
@@ -106,7 +130,7 @@ var Keep = (function() {
    * @param {string} name The resource name of the note (e.g., 'notes/123').
    * @returns {Object} The note.
    */
-  Notes.prototype.get = function(name) {
+  Notes.prototype.get = function (name) {
     return this.service.fetch('v1/' + name, 'get');
   };
 
@@ -115,7 +139,7 @@ var Keep = (function() {
    * @param {Object} optionalArgs Optional arguments (pageSize, pageToken, filter).
    * @returns {Object} ListNotesResponse
    */
-  Notes.prototype.list = function(optionalArgs) {
+  Notes.prototype.list = function (optionalArgs) {
     return this.service.fetch('v1/notes', 'get', null, optionalArgs);
   };
 
@@ -124,14 +148,14 @@ var Keep = (function() {
    * @param {string} name The resource name of the note to delete.
    * @returns {Object} Empty response.
    */
-  Notes.prototype.delete = function(name) {
+  Notes.prototype.delete = function (name) {
     return this.service.fetch('v1/' + name, 'delete');
   };
 
   /**
    * Permissions Resource (Sub-collection of Notes)
    */
-  var Permissions = function(service) {
+  var Permissions = function (service) {
     this.service = service;
   };
 
@@ -141,25 +165,14 @@ var Keep = (function() {
    * @param {Array<Object>} permissions The list of permissions to create.
    * @returns {Object} BatchCreatePermissionsResponse
    */
-  Permissions.prototype.batchCreate = function(parent, permissions) {
-    var payload = { requests: permissions.map(function(p) { return { permission: p }; }) };
-    // The API expects 'requests' which is a list of CreatePermissionRequest. 
-    // Each CreatePermissionRequest has 'parent' and 'permission'.
-    // However, the endpoint is v1/{parent}/permissions:batchCreate.
-    // Let's re-check the discovery doc or assume standard structure.
-    // Doc said: request body is BatchCreatePermissionsRequest.
-    // BatchCreatePermissionsRequest has 'requests' which is array of CreatePermissionRequest.
-    // CreatePermissionRequest has 'parent' and 'permission'.
-    // Since we are calling on a specific parent URL, maybe parent in body is redundant but required?
-    // Let's assume user passes just the permission objects and we wrap them.
-    
-    var requests = permissions.map(function(p) {
-        return {
-            parent: parent,
-            permission: p
-        };
+  Permissions.prototype.batchCreate = function (parent, permissions) {
+    var requests = permissions.map(function (p) {
+      return {
+        parent: parent,
+        permission: p
+      };
     });
-    
+
     return this.service.fetch('v1/' + parent + '/permissions:batchCreate', 'post', { requests: requests });
   };
 
@@ -169,7 +182,7 @@ var Keep = (function() {
    * @param {Array<string>} permissionNames The list of permission resource names to delete.
    * @returns {Object} Empty response.
    */
-  Permissions.prototype.batchDelete = function(parent, permissionNames) {
+  Permissions.prototype.batchDelete = function (parent, permissionNames) {
     var names = permissionNames; // Array of strings
     return this.service.fetch('v1/' + parent + '/permissions:batchDelete', 'post', { names: names });
   };
@@ -178,7 +191,7 @@ var Keep = (function() {
   /**
    * Media Resource
    */
-  var Media = function(service) {
+  var Media = function (service) {
     this.service = service;
   };
 
@@ -188,26 +201,26 @@ var Keep = (function() {
    * @param {string} mimeType The MIME type to download.
    * @returns {Blob} The attachment data as a Blob.
    */
-  Media.prototype.download = function(name, mimeType) {
+  Media.prototype.download = function (name, mimeType) {
     return this.service.fetchMedia('v1/' + name, mimeType);
   };
 
   // --- Main Library Object ---
 
   return {
-    newService: function() {
-      return new Service();
+    newService: function (jsonKey, userEmail) {
+      return new Service(jsonKey, userEmail);
     },
     /**
      * @param {Service} service
      */
-    Notes: function(service) {
+    Notes: function (service) {
       return new Notes(service);
     },
     /**
      * @param {Service} service
      */
-    Media: function(service) {
+    Media: function (service) {
       return new Media(service);
     }
   };
@@ -216,10 +229,12 @@ var Keep = (function() {
 
 /**
  * Creates a new Keep Service.
+ * @param {Object} jsonKey Service Account JSON key
+ * @param {string} [userEmail] Email to impersonate (for Domain-Wide Delegation)
  * @returns {Service}
  */
-function newService() {
-  return Keep.newService();
+function newService(jsonKey, userEmail) {
+  return Keep.newService(jsonKey, userEmail);
 }
 
 /**

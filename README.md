@@ -1,6 +1,6 @@
 # Google Keep API Library for Google Apps Script
 
-This library allows you to interact with the Google Keep API directly from Google Apps Script.
+This library allows you to interact with the Google Keep API directly from Google Apps Script using a Service Account.
 
 ## Setup
 
@@ -9,28 +9,46 @@ This library allows you to interact with the Google Keep API directly from Googl
     -   Select your project.
     -   Enable the "Google Keep API".
 
-2.  **Add Scopes**:
-    -   Open your Apps Script project.
-    -   Go to **Project Settings** > **Show "appsscript.json" manifest file in editor**.
-    -   Add the following scopes to `appsscript.json`:
-        ```json
-        "oauthScopes": [
-          "https://www.googleapis.com/auth/keep",
-          "https://www.googleapis.com/auth/script.external_request"
-        ]
-        ```
-        *(Note: `script.external_request` is needed for `UrlFetchApp`)*
+2.  **Create Service Account**:
+    -   Go to **IAM & Admin** > **Service Accounts**.
+    -   Create a new Service Account.
+    -   Create a JSON key for this service account and download it.
+    -   *Note: If you need to access user data (Domain-Wide Delegation), enable it for this service account and grant scopes in the Admin Console.*
 
-3.  **Install Library**:
+3.  **Add OAuth2 Library**:
+    -   Open your Apps Script project.
+    -   Click **Libraries** > **Add a library**.
+    -   Enter Script ID: `1B7FSrk5Zi6L1rSxxTDgDEUsPzlukDsi4KGuTMorsTQHhGBzBkMun4iDF`
+    -   Select the latest version and click **Add**.
+
+4.  **Install Library**:
     -   Copy the content of `Keep.js` into a new script file in your project (e.g., `Keep.gs`).
-    -   *Alternatively, if this were published as a library, you would add it by Script ID.*
 
 ## Usage
 
 ### Initialize Service
 
 ```javascript
-var service = Keep.newService();
+// Paste your JSON key content here
+var jsonKey = {
+  "type": "service_account",
+  "project_id": "...",
+  "private_key_id": "...",
+  "private_key": "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n",
+  "client_email": "...",
+  "client_id": "...",
+  "auth_uri": "...",
+  "token_uri": "...",
+  "auth_provider_x509_cert_url": "...",
+  "client_x509_cert_url": "..."
+};
+
+// Initialize service (Service Account)
+var service = Keep.newService(jsonKey);
+
+// OR Initialize service with Domain-Wide Delegation (Impersonation)
+// var userEmail = 'user@example.com';
+// var service = Keep.newService(jsonKey, userEmail);
 ```
 
 ### Notes
